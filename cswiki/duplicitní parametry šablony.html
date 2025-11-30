@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analýza duplicitních parametrů šablony</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+    </style>
+</head>
+<body class="p-8">
+
+    <div class="max-w-4xl mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-200">
+        <h1 class="text-3xl font-bold mb-6 text-center text-gray-800">Analýza duplicitních parametrů šablony</h1>
+        <p class="text-gray-600 mb-6 text-center">Vložte wikikód z článku, který chcete analyzovat, a program najde duplicitní parametry v šablonách.</p>
+
+        <div class="mb-6">
+            <label for="inputText" class="block text-gray-700 font-medium mb-2">Vstupní text (Wikikód):</label>
+            <textarea id="inputText" rows="15" class="w-full p-4 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow resize-y" placeholder="Vložte zde wikikód..."></textarea>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-4 mb-6">
+            <button id="analyzeBtn" class="w-full sm:w-1/3 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-md hover:bg-indigo-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">Analyzovat</button>
+            <button id="clearBtn" class="w-full sm:w-1/3 px-6 py-3 bg-gray-200 text-gray-800 font-semibold rounded-full shadow-md hover:bg-gray-300 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2">Vymazat vstup</button>
+            <button id="copyBtn" class="w-full sm:w-1/3 px-6 py-3 bg-lime-600 text-white font-semibold rounded-full shadow-md hover:bg-lime-700 transition-colors focus:outline-none focus:ring-2 focus:ring-lime-500 focus:ring-offset-2">Kopírovat shrnutí</button>
+        </div>
+
+        <div class="mb-6">
+            <label for="outputBox" class="block text-gray-700 font-medium mb-2">Výstup:</label>
+            <div id="outputBox" class="w-full min-h-[10rem] p-4 bg-gray-100 border border-gray-300 rounded-xl overflow-auto text-gray-800 break-words whitespace-pre-wrap">Žádné duplicitní parametry nebyly nalezeny.</div>
+        </div>
+
+        <div id="messageBox" class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-xl transition-transform transform -translate-y-4 opacity-0 z-50">
+            Text zkopírován do schránky!
+        </div>
+
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const inputText = document.getElementById('inputText');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            const clearBtn = document.getElementById('clearBtn');
+            const copyBtn = document.getElementById('copyBtn');
+            const outputBox = document.getElementById('outputBox');
+            const messageBox = document.getElementById('messageBox');
+
+            // Funkce pro zobrazení dočasné zprávy
+            const showMessage = (text) => {
+                messageBox.textContent = text;
+                messageBox.classList.remove('-translate-y-4', 'opacity-0');
+                messageBox.classList.add('translate-y-0', 'opacity-100');
+                setTimeout(() => {
+                    messageBox.classList.remove('translate-y-0', 'opacity-100');
+                    messageBox.classList.add('-translate-y-4', 'opacity-0');
+                }, 2000);
+            };
+
+            // Funkce pro nalezení duplicitních parametrů
+            const findDuplicates = (text) => {
+                const results = [];
+                // Regulární výraz pro nalezení šablon a jejich obsahu
+                const templateRegex = /\{\{([^{}]*?)\}\}/g;
+                let templateMatch;
+
+                while ((templateMatch = templateRegex.exec(text)) !== null) {
+                    const templateContent = templateMatch[1];
+                    const templateStart = templateMatch.index;
+                    const templateEnd = templateRegex.lastIndex;
+
+                    const parts = templateContent.split('|');
+                    if (parts.length > 1) {
+                        const templateName = parts[0].trim();
+                        const parameters = parts.slice(1);
+                        const seenParameters = new Set();
+                        
+                        parameters.forEach(param => {
+                            const trimmedParam = param.trim();
+                            // Hledá parametr a hodnotu, ale ignoruje prázdné nebo komentářové parametry
+                            const match = trimmedParam.match(/^([^=]+)/);
+                            if (match) {
+                                const paramName = match[1].trim();
+                                if (seenParameters.has(paramName)) {
+                                    // Pokud je duplicitní, přidá do výsledků
+                                    const surroundingText = text.substring(Math.max(0, templateStart - 30), Math.min(text.length, templateEnd + 30));
+                                    results.push({
+                                        template: templateName,
+                                        parameter: paramName,
+                                        context: `...${surroundingText.replace(/\n/g, ' ').trim()}...`
+                                    });
+                                } else {
+                                    seenParameters.add(paramName);
+                                }
+                            }
+                        });
+                    }
+                }
+                return results;
+            };
+
+            // Funkce pro analýzu textu
+            analyzeBtn.addEventListener('click', () => {
+                const text = inputText.value;
+                if (!text.trim()) {
+                    outputBox.textContent = "Vložte prosím nějaký text do vstupního pole.";
+                    return;
+                }
+                const duplicates = findDuplicates(text);
+                if (duplicates.length > 0) {
+                    let outputHtml = `<div class="font-bold mb-2">Nalezeny duplicitní parametry:</div>`;
+                    duplicates.forEach(dup => {
+                        outputHtml += `
+                            <div class="mb-4 p-4 border border-red-300 bg-red-50 rounded-lg">
+                                <p><span class="font-semibold text-red-700">Šablona:</span> {{${dup.template}}}</p>
+                                <p><span class="font-semibold text-red-700">Duplicitní parametr:</span> ${dup.parameter}</p>
+                                <p class="mt-2 text-sm text-gray-600">
+                                    <span class="font-semibold">Kontext:</span> 
+                                    <br>
+                                    ${dup.context}
+                                </p>
+                            </div>
+                        `;
+                    });
+                    outputBox.innerHTML = outputHtml;
+                } else {
+                    outputBox.textContent = "Žádné duplicitní parametry nebyly nalezeny.";
+                }
+            });
+
+            // Funkce pro vymazání vstupu
+            clearBtn.addEventListener('click', () => {
+                inputText.value = '';
+                outputBox.textContent = "Žádné duplicitní parametry nebyly nalezeny.";
+                showMessage('Vstup vymazán!');
+            });
+
+            // Funkce pro kopírování shrnutí
+            copyBtn.addEventListener('click', () => {
+                const summaryText = "oprava duplicitního volání parametru šablony";
+                // Používáme fallback metodu pro kopírování kvůli omezením iframe
+                const textarea = document.createElement('textarea');
+                textarea.value = summaryText;
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    showMessage('Shrnutí zkopírováno!');
+                } catch (err) {
+                    console.error('Nepodařilo se zkopírovat text: ', err);
+                    showMessage('Kopírování se nezdařilo.');
+                }
+                document.body.removeChild(textarea);
+            });
+        });
+    </script>
+
+</body>
+</html>
