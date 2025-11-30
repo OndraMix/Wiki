@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Převodník H-vět a P-vět do Wikipedistických šablon</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for a polished look */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .container {
+            max-width: 600px;
+            min-height: 100vh;
+        }
+        .message-box {
+            transition: opacity 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 flex items-center justify-center p-4">
+    <div class="container bg-white p-8 rounded-2xl shadow-2xl space-y-6 flex flex-col justify-center">
+        <h1 class="text-3xl font-bold text-center text-slate-800">Převodník H-vět a P-vět</h1>
+        <p class="text-center text-slate-500 mb-6">Převod H a P vět z obecného formátu (například v PubChem) do wikipedistických šablon na českou Wikipedii</p>
+        
+        <!-- Input Section -->
+        <div>
+            <label for="inputField" class="block text-slate-600 font-medium mb-2">Vstupní text:</label>
+            <textarea id="inputField" rows="8" class="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors"></textarea>
+        </div>
+
+        <!-- Button Section -->
+        <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+            <button id="formatButton" class="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors">
+                Převést do wikikódu
+            </button>
+            <button id="copyButton" class="w-full px-6 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition-colors">
+                Kopírovat do schránky
+            </button>
+            <button id="clearButton" class="w-full px-6 py-3 bg-gray-400 text-white font-semibold rounded-lg shadow-md hover:bg-gray-500 transition-colors">
+                Vyčistit vstup
+            </button>
+        </div>
+
+        <!-- Output Section -->
+        <div>
+            <label for="outputField" class="block text-slate-600 font-medium mb-2">Wikišablony P a H vět:</label>
+            <textarea id="outputField" rows="8" class="w-full p-3 border border-slate-300 rounded-lg bg-slate-100 text-slate-800" readonly></textarea>
+        </div>
+
+        <!-- Message Box -->
+        <div id="messageBox" class="message-box fixed top-4 right-4 p-4 rounded-lg shadow-xl text-white font-semibold opacity-0 pointer-events-none"></div>
+
+    </div>
+
+    <script>
+        // Get references to all necessary HTML elements
+        const inputField = document.getElementById('inputField');
+        const outputField = document.getElementById('outputField');
+        const formatButton = document.getElementById('formatButton');
+        const copyButton = document.getElementById('copyButton');
+        const clearButton = document.getElementById('clearButton');
+        const messageBox = document.getElementById('messageBox');
+
+        // Function to show a temporary message
+        function showMessage(text, type = 'info') {
+            let bgColor = 'bg-gray-600';
+            if (type === 'warning') {
+                bgColor = 'bg-red-500';
+            } else if (type === 'success') {
+                bgColor = 'bg-green-500';
+            }
+
+            messageBox.textContent = text;
+            messageBox.className = `message-box fixed top-4 right-4 p-4 rounded-lg shadow-xl text-white font-semibold opacity-100 ${bgColor}`;
+            
+            // Hide the message after 3 seconds
+            setTimeout(() => {
+                messageBox.className = messageBox.className.replace('opacity-100', 'opacity-0');
+            }, 3000);
+        }
+
+        // Function to format the input text
+        function formatText() {
+            const inputText = inputField.value.trim();
+            if (!inputText) {
+                showMessage("Vstupní okno je prázdné!", 'warning');
+                return;
+            }
+
+            // Regular expressions to find H and P phrases
+            const hRegex = /H(\d{3})/g;
+            // Updated regex to correctly capture 'P' followed by a number, which can be followed by a '+'
+            // and an optional 'P' before the next number.
+            const pRegex = /P(\d{3}(?:\+[P]?\d{3})*)/g;
+
+            const hMatches = [...inputText.matchAll(hRegex)];
+            const pMatches = [...inputText.matchAll(pRegex)];
+
+            // Format H and P phrases into the new format
+            const formattedH = hMatches.map(match => `{{H|${match[1]}}}`);
+            const formattedP = pMatches.map(match => {
+                // The regex now correctly captures the full string (e.g., '301+317'),
+                // but the replace is kept for backward compatibility with 'P301+P317'
+                const pCode = match[1].replace(/\+P/g, '+');
+                return `{{P|${pCode}}}`;
+            });
+
+            // Combine the formatted results
+            const formattedText = [...formattedH, ...formattedP].join(', ');
+
+            // Display the result
+            outputField.value = formattedText;
+        }
+
+        // Function to copy the output text to the clipboard
+        function copyToClipboard() {
+            const formattedText = outputField.value.trim();
+            if (!formattedText) {
+                showMessage("Výstupní okno je prázdné!", 'warning');
+                return;
+            }
+
+            try {
+                // Use the standard Clipboard API for modern browsers
+                navigator.clipboard.writeText(formattedText).then(() => {
+                    showMessage("Text zkopírován do schránky!", 'success');
+                }).catch(() => {
+                    // Fallback for older browsers (document.execCommand is deprecated but still works)
+                    const tempTextarea = document.createElement('textarea');
+                    tempTextarea.value = formattedText;
+                    document.body.appendChild(tempTextarea);
+                    tempTextarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(tempTextarea);
+                    showMessage("Text zkopírován do schránky!", 'success');
+                });
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
+                showMessage("Kopírování se nezdařilo.", 'warning');
+            }
+        }
+        
+        // Function to clear both input and output fields
+        function clearFields() {
+            inputField.value = '';
+            outputField.value = '';
+            showMessage("Pole vyčištěna.", 'info');
+        }
+
+        // Add event listeners to the buttons
+        formatButton.addEventListener('click', formatText);
+        copyButton.addEventListener('click', copyToClipboard);
+        clearButton.addEventListener('click', clearFields);
+
+    </script>
+</body>
+</html>
