@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wiki XML Infobox Parser</title>
+    
+    <!-- Načtení Reactu a Tailwind CSS z externích zdrojů (CDN) -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Styly pro animace -->
+    <style>
+        .animate-in { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        // --- DEFINICE IKON (náhrada za lucide-react pro jeden soubor) ---
+        const Icon = ({ path, className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                {path}
+            </svg>
+        );
+
+        const Icons = {
+            Database: (props) => <Icon {...props} path={<><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></>} />,
+            Settings: (props) => <Icon {...props} path={<><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></>} />,
+            Upload: (props) => <Icon {...props} path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>} />,
+            Code: (props) => <Icon {...props} path={<><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></>} />,
+            AlertCircle: (props) => <Icon {...props} path={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />,
+            Download: (props) => <Icon {...props} path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>} />,
+            FileJson: (props) => <Icon {...props} path={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M10 13a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1"/><path d="M14 13a1 1 0 0 0 1 1v1a1 1 0 0 0-1 1"/></>} />
+        };
+
+        // --- KONFIGURACE ---
+        const DEFAULT_TEMPLATES = [
+          "Infobox - chemická sloučenina",
+          "Chembox",
+          "Infobox",
+          "Infobox - osoba",
+          "Infobox - firma"
+        ];
+
+        // --- POMOCNÉ FUNKCE ---
+        const splitByPipeSecurely = (text) => {
+          const parts = [];
+          let currentPart = "";
+          let depthBraces = 0; // {{ }}
+          let depthBrackets = 0; // [[ ]]
+
+          for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            const nextChar = text[i + 1] || "";
+
+            if (char === '{' && nextChar === '{') {
+              depthBraces++;
+              i++; 
+              currentPart += "{{";
+              continue;
+            }
+            if (char === '}' && nextChar === '}') {
+              depthBraces--;
+              i++;
+              currentPart += "}}";
+              continue;
+            }
+            if (char === '[' && nextChar === '[') {
+              depthBrackets++;
+              i++;
+              currentPart += "[[";
+              continue;
+            }
+            if (char === ']' && nextChar === ']') {
+              depthBrackets--;
+              i++;
+              currentPart += "]]";
+              continue;
+            }
+
+            if (char === '|' && depthBraces === 0 && depthBrackets === 0) {
+              parts.push(currentPart);
+              currentPart = "";
+            } else {
+              currentPart += char;
+            }
+          }
+          if (currentPart) parts.push(currentPart);
+          return parts;
+        };
+
+        // --- HLAVNÍ APLIKACE ---
+        function WikiParserApp() {
+          const [file, setFile] = useState(null);
+          const [templateNames, setTemplateNames] = useState(DEFAULT_TEMPLATES.join("\n"));
+          const [isProcessing, setIsProcessing] = useState(false);
+          const [result, setResult] = useState(null);
+          const [error, setError] = useState(null);
+          const [progress, setProgress] = useState(0);
+
+          const processFile = async () => {
+            if (!file) return;
+            setIsProcessing(true);
+            setResult(null);
+            setError(null);
+            setProgress(0);
+
+            const targetTemplates = templateNames
+              .split("\n")
+              .map(t => t.trim())
+              .filter(t => t.length > 0);
+
+            const reader = new FileReader();
+
+            reader.onload = (e) => {
+              try {
+                const textContent = e.target.result;
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(textContent, "text/xml");
+                
+                const parserError = xmlDoc.querySelector("parsererror");
+                if (parserError) {
+                  throw new Error("Chyba při čtení XML souboru. Soubor může být poškozený.");
+                }
+
+                const pages = xmlDoc.getElementsByTagName("page");
+                const totalPages = pages.length;
+                const extractedData = [];
+                let articlesWithInfoboxCount = 0;
+
+                for (let i = 0; i < totalPages; i++) {
+                  const page = pages[i];
+                  const title = page.getElementsByTagName("title")[0]?.textContent || "Neznámý název";
+                  const revision = page.getElementsByTagName("revision")[0];
+                  const textElement = revision?.getElementsByTagName("text")[0];
+                  const rawWikiText = textElement?.textContent || "";
+
+                  const foundTemplates = extractTemplates(rawWikiText, targetTemplates);
+
+                  if (foundTemplates.length > 0) {
+                    articlesWithInfoboxCount++;
+                    extractedData.push({
+                      title: title,
+                      id: page.getElementsByTagName("id")[0]?.textContent,
+                      infoboxes: foundTemplates
+                    });
+                  }
+
+                  if (i % 100 === 0) {
+                    setProgress(Math.round(((i + 1) / totalPages) * 100));
+                  }
+                }
+
+                setResult({
+                  stats: {
+                    totalArticlesScanned: totalPages,
+                    articlesWithInfobox: articlesWithInfoboxCount,
+                    generatedAt: new Date().toISOString()
+                  },
+                  data: extractedData
+                });
+                setProgress(100);
+
+              } catch (err) {
+                setError(err.message);
+              } finally {
+                setIsProcessing(false);
+              }
+            };
+
+            reader.onerror = () => {
+              setError("Nepodařilo se načíst soubor.");
+              setIsProcessing(false);
+            };
+
+            reader.readAsText(file);
+          };
+
+          const extractTemplates = (text, targets) => {
+            const results = [];
+            
+            targets.forEach(targetName => {
+              let cursor = 0;
+              while (cursor < text.length) {
+                const startIndex = text.indexOf("{{", cursor);
+                if (startIndex === -1) break;
+
+                const snippet = text.substr(startIndex + 2).trim();
+                const isMatch = snippet.toLowerCase().startsWith(targetName.toLowerCase());
+                
+                const charAfterName = snippet.charAt(targetName.length);
+                const validSeparators = ['|', '}', ' ', '\n', '\r', '\t'];
+                const isWordBoundary = validSeparators.includes(charAfterName);
+
+                if (isMatch && isWordBoundary) {
+                  const contentStart = startIndex + 2;
+                  let braceCount = 0;
+                  let endIndex = -1;
+
+                  for (let i = contentStart; i < text.length; i++) {
+                    if (text[i] === '{' && text[i+1] === '{') {
+                      braceCount++;
+                      i++; 
+                    } else if (text[i] === '}' && text[i+1] === '}') {
+                      if (braceCount === 0) {
+                        endIndex = i;
+                        break;
+                      }
+                      braceCount--;
+                      i++;
+                    }
+                  }
+
+                  if (endIndex !== -1) {
+                    const fullContent = text.substring(contentStart, endIndex);
+                    const parsedData = parseTemplateContent(fullContent);
+                    
+                    results.push({
+                      templateName: targetName,
+                      originalRaw: fullContent.substr(0, 50) + "...",
+                      data: parsedData
+                    });
+
+                    cursor = endIndex + 2;
+                  } else {
+                    cursor = startIndex + 2;
+                  }
+                } else {
+                  cursor = startIndex + 2;
+                }
+              }
+            });
+
+            return results;
+          };
+
+          const parseTemplateContent = (contentString) => {
+            const firstPipeIndex = contentString.indexOf('|');
+            if (firstPipeIndex === -1) {
+              return {}; 
+            }
+
+            const paramsString = contentString.substring(firstPipeIndex + 1);
+            const rawParams = splitByPipeSecurely(paramsString);
+            const data = {};
+
+            rawParams.forEach(param => {
+              const eqIndex = param.indexOf('=');
+              if (eqIndex !== -1) {
+                const key = param.substring(0, eqIndex).trim();
+                const value = param.substring(eqIndex + 1).trim();
+                if (key) {
+                  data[key] = value;
+                }
+              } else {
+                if (param.trim()) {
+                   data[param.trim()] = true; 
+                }
+              }
+            });
+
+            return data;
+          };
+
+          const downloadJSON = () => {
+            if (!result) return;
+            const jsonString = JSON.stringify(result, null, 2);
+            const blob = new Blob([jsonString], { type: "application/json" });
+            const href = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = href;
+            link.download = "infoboxy_vystup.json";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          };
+
+          return (
+            <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans">
+              <div className="max-w-4xl mx-auto space-y-6">
+                
+                {/* Header */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                  <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                    <Icons.Database className="w-8 h-8 text-blue-600" />
+                    Wiki XML Infobox Parser
+                  </h1>
+                  <p className="text-gray-600 mt-2">
+                    Nástroj pro extrakci dat z infoboxů Wikipedie. Nahrajte XML soubor, nastavte hledané šablony a stáhněte si strukturovaný JSON.
+                  </p>
+                </div>
+
+                {/* Konfigurace */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                  <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2 mb-4">
+                    <Icons.Settings className="w-5 h-5" />
+                    Konfigurace šablon
+                  </h2>
+                  <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4 text-sm text-blue-800">
+                    <strong>Důležité:</strong> Zde zadejte názvy infoboxů, které má program v XML hledat. 
+                    Každý název na nový řádek. Program hledá přesnou shodu začátku (např. "Chembox" najde i "chembox").
+                  </div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Seznam hledaných infoboxů (jeden na řádek):
+                  </label>
+                  <textarea
+                    value={templateNames}
+                    onChange={(e) => setTemplateNames(e.target.value)}
+                    className="w-full h-32 p-3 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Infobox - chemická sloučenina&#10;Chembox&#10;..."
+                  />
+                </div>
+
+                {/* Upload a Akce */}
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                    <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <Icons.Upload className="w-5 h-5" />
+                      1. Nahrát soubor
+                    </h2>
+                    <input
+                      type="file"
+                      accept=".xml"
+                      onChange={(e) => setFile(e.target.files[0])}
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    />
+                    {file && (
+                      <div className="mt-2 text-sm text-green-600 font-medium">
+                        Vybrán: {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-center items-start">
+                     <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <Icons.Code className="w-5 h-5" />
+                      2. Zpracovat
+                    </h2>
+                    <button
+                      onClick={processFile}
+                      disabled={!file || isProcessing}
+                      className={`w-full py-3 px-4 rounded-lg font-semibold text-white shadow-sm transition-all
+                        ${!file || isProcessing 
+                          ? 'bg-gray-300 cursor-not-allowed' 
+                          : 'bg-blue-600 hover:bg-blue-700 active:scale-95'}`}
+                    >
+                      {isProcessing ? 'Zpracovávám...' : 'Spustit analýzu'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                {isProcessing && (
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                    <div className="flex justify-between mb-1">
+                      <span className="text-sm font-medium text-blue-700">Analyzuji XML...</span>
+                      <span className="text-sm font-medium text-blue-700">{progress}%</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2.5">
+                      <div 
+                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
+                        style={{ width: `${progress}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Chyby */}
+                {error && (
+                  <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md flex items-center gap-3">
+                    <Icons.AlertCircle className="text-red-500 w-6 h-6" />
+                    <p className="text-red-700">{error}</p>
+                  </div>
+                )}
+
+                {/* Výsledky */}
+                {result && (
+                  <div className="space-y-6 animate-in fade-in duration-500">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                        <div className="text-green-600 text-sm font-medium">Nalezené články s infoboxem</div>
+                        <div className="text-3xl font-bold text-green-800">{result.stats.articlesWithInfobox}</div>
+                      </div>
+                      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <div className="text-gray-600 text-sm font-medium">Celkem prohledaných stránek</div>
+                        <div className="text-3xl font-bold text-gray-800">{result.stats.totalArticlesScanned}</div>
+                      </div>
+                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 flex items-center justify-center">
+                         <button
+                          onClick={downloadJSON}
+                          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+                        >
+                          <Icons.Download className="w-5 h-5" />
+                          Stáhnout JSON
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Náhled dat */}
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                      <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <Icons.FileJson className="w-5 h-5" />
+                        Náhled výstupních dat (Prvních 3 záznamů)
+                      </h3>
+                      <div className="bg-gray-900 text-gray-100 p-4 rounded-lg font-mono text-sm overflow-auto max-h-96">
+                        <pre>{JSON.stringify({ 
+                          ...result, 
+                          data: result.data.slice(0, 3) 
+                        }, null, 2)}</pre>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2 text-right">
+                        Zobrazuji pouze ukázku. Kompletní data stáhněte tlačítkem výše.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<WikiParserApp />);
+    </script>
+</body>
+</html>

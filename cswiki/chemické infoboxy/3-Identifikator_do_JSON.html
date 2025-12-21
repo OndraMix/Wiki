@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wikipedia to Wikidata Linker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-50 p-4 md:p-8 text-slate-800">
+
+    <div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
+        <!-- Header -->
+        <div class="bg-indigo-600 p-6 text-white">
+            <h1 class="text-2xl font-bold flex items-center gap-2">
+                <i data-lucide="globe" class="w-8 h-8"></i>
+                Wikipedia to Wikidata Linker
+            </h1>
+            <p class="opacity-80 text-sm mt-1">Doplnění parametru WIKIDATA_CLANKU do JSON souboru.</p>
+        </div>
+
+        <div class="p-6 space-y-6">
+            <!-- Inputs -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="space-y-2">
+                    <label class="block text-sm font-semibold text-slate-700">1. Nahrajte JSON soubor</label>
+                    <div class="relative border-2 border-dashed border-slate-300 rounded-xl p-4 hover:border-indigo-400 transition-colors cursor-pointer group">
+                        <input type="file" id="fileInput" accept=".json" class="absolute inset-0 opacity-0 cursor-pointer">
+                        <div class="flex flex-col items-center justify-center text-slate-500 group-hover:text-indigo-600">
+                            <i data-lucide="upload" class="w-8 h-8 mb-2"></i>
+                            <span id="fileNameDisplay" class="text-xs text-center font-medium">Vyberte soubor</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-2">
+                    <label class="block text-sm font-semibold text-slate-700">2. Jazyk článků v souboru</label>
+                    <div class="flex items-center gap-2">
+                        <input type="text" id="langInput" value="cs" class="w-full px-4 py-3 bg-slate-100 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all font-mono" maxlength="5">
+                        <span class="text-sm font-bold text-indigo-600">wiki</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400">Příklad: cs, en, sk, de</p>
+                </div>
+            </div>
+
+            <!-- Status Box -->
+            <div id="statusBox" class="hidden p-4 rounded-xl flex items-start gap-3 border">
+                <div id="statusIcon"></div>
+                <span id="statusMessage" class="text-sm font-medium"></span>
+            </div>
+
+            <!-- Progress Bar -->
+            <div id="progressContainer" class="hidden space-y-3">
+                <div class="flex justify-between text-xs font-bold text-slate-600 uppercase tracking-wider">
+                    <span>Postup zpracování</span>
+                    <span id="progressText">0 / 0</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden border border-slate-200">
+                    <div id="progressBar" class="bg-indigo-600 h-full transition-all duration-300 shadow-[0_0_10px_rgba(79,70,229,0.5)]" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex flex-col sm:flex-row gap-4 pt-4">
+                <button id="processBtn" disabled class="flex-1 flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-bold transition-all shadow-md bg-slate-200 text-slate-400 cursor-not-allowed">
+                    Propojit s Wikidata
+                </button>
+
+                <button id="downloadBtn" disabled class="flex-1 flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-bold border-2 border-slate-200 text-slate-300 cursor-not-allowed transition-all">
+                    <i data-lucide="download" class="w-5 h-5"></i>
+                    Stáhnout výsledek
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-slate-100 p-4 text-[10px] text-slate-500 border-t border-slate-200 text-center">
+            <p>Zpracování probíhá přímo ve vašem prohlížeči pomocí Wikidata API. Vyžadováno připojení k internetu.</p>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let jsonData = null;
+        let fileName = "";
+        let isProcessing = false;
+
+        // Elements
+        const fileInput = document.getElementById('fileInput');
+        const fileNameDisplay = document.getElementById('fileNameDisplay');
+        const langInput = document.getElementById('langInput');
+        const processBtn = document.getElementById('processBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const statusBox = document.getElementById('statusBox');
+        const statusIcon = document.getElementById('statusIcon');
+        const statusMessage = document.getElementById('statusMessage');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressText = document.getElementById('progressText');
+        const progressBar = document.getElementById('progressBar');
+
+        // Init Lucide Icons
+        lucide.createIcons();
+
+        // Helper: Show Status
+        function setStatus(type, message) {
+            statusBox.classList.remove('hidden', 'bg-red-50', 'bg-emerald-50', 'bg-blue-50', 'border-red-200', 'border-emerald-200', 'border-blue-200', 'text-red-700', 'text-emerald-700', 'text-blue-700');
+            
+            if (type === 'error') {
+                statusBox.classList.add('bg-red-50', 'border-red-200', 'text-red-700');
+                statusIcon.innerHTML = '<i data-lucide="alert-circle" class="w-5 h-5 flex-shrink-0"></i>';
+            } else if (type === 'success') {
+                statusBox.classList.add('bg-emerald-50', 'border-emerald-200', 'text-emerald-700');
+                statusIcon.innerHTML = '<i data-lucide="check-circle" class="w-5 h-5 flex-shrink-0"></i>';
+            } else {
+                statusBox.classList.add('bg-blue-50', 'border-blue-200', 'text-blue-700');
+                statusIcon.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i>';
+            }
+            statusMessage.textContent = message;
+            lucide.createIcons();
+        }
+
+        // File Upload
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            fileName = file.name;
+            fileNameDisplay.textContent = fileName;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const parsed = JSON.parse(event.target.result);
+                    if (!parsed.data || !Array.isArray(parsed.data)) {
+                        setStatus('error', 'Neplatný formát: JSON musí obsahovat pole "data".');
+                        return;
+                    }
+                    jsonData = parsed;
+                    setStatus('success', 'Soubor byl úspěšně nahrán.');
+                    processBtn.disabled = false;
+                    processBtn.className = "flex-1 flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-bold transition-all shadow-md bg-indigo-600 text-white hover:bg-indigo-700 active:scale-[0.98]";
+                } catch (err) {
+                    setStatus('error', 'Chyba při čtení JSON: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        // Processing Logic
+        processBtn.addEventListener('click', async () => {
+            if (!jsonData || !jsonData.data || isProcessing) return;
+
+            isProcessing = true;
+            processBtn.disabled = true;
+            fileInput.disabled = true;
+            langInput.disabled = true;
+            downloadBtn.disabled = true;
+            
+            setStatus('info', 'Probíhá propojování s Wikidata API...');
+            progressContainer.classList.remove('hidden');
+
+            const articles = jsonData.data;
+            const total = articles.length;
+            const batchSize = 50;
+            const lang = langInput.value.toLowerCase().trim();
+            const site = `${lang}wiki`;
+
+            for (let i = 0; i < total; i += batchSize) {
+                const batch = articles.slice(i, i + batchSize);
+                const titles = batch.map(a => a.title.replace(/_/g, ' ')).join('|');
+
+                try {
+                    const response = await fetch(
+                        `https://www.wikidata.org/w/api.php?action=wbgetentities&sites=${site}&titles=${encodeURIComponent(titles)}&props=sitelinks&redirects=yes&format=json&origin=*`
+                    );
+                    
+                    if (!response.ok) throw new Error('Chyba sítě');
+                    
+                    const result = await response.json();
+                    const entities = result.entities || {};
+                    const titleToQid = {};
+                    
+                    // Normalizace a redirecty od API
+                    const apiNormalized = [...(result.normalized || []), ...(result.redirects || [])];
+                    const normalizationMap = {};
+                    apiNormalized.forEach(n => {
+                        normalizationMap[n.to.toLowerCase()] = n.from.toLowerCase();
+                    });
+
+                    Object.values(entities).forEach(entity => {
+                        if (entity.id && entity.sitelinks && entity.sitelinks[site]) {
+                            const mainTitle = entity.sitelinks[site].title;
+                            const qid = entity.id;
+                            titleToQid[mainTitle.toLowerCase()] = qid;
+                            titleToQid[mainTitle.replace(/ /g, '_').toLowerCase()] = qid;
+                            
+                            const originalFromApi = normalizationMap[mainTitle.toLowerCase()];
+                            if (originalFromApi) {
+                                titleToQid[originalFromApi] = qid;
+                            }
+                        }
+                    });
+
+                    batch.forEach(article => {
+                        const lookupTitle = article.title.toLowerCase();
+                        const qid = titleToQid[lookupTitle] || titleToQid[lookupTitle.replace(/_/g, ' ')];
+                        article.WIKIDATA_CLANKU = qid || null;
+                    });
+
+                    // Update UI
+                    const currentProgress = Math.min(i + batchSize, total);
+                    progressText.textContent = `${currentProgress} / ${total}`;
+                    progressBar.style.width = `${(currentProgress / total) * 100}%`;
+
+                } catch (err) {
+                    console.error("Batch error:", err);
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 150));
+            }
+
+            isProcessing = false;
+            fileInput.disabled = false;
+            langInput.disabled = false;
+            processBtn.disabled = false;
+            
+            downloadBtn.disabled = false;
+            downloadBtn.className = "flex-1 flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-bold border-2 transition-all border-indigo-600 text-indigo-600 hover:bg-indigo-50 active:scale-[0.98]";
+            
+            setStatus('success', 'Zpracování dokončeno!');
+        });
+
+        // Download logic
+        downloadBtn.addEventListener('click', () => {
+            if (!jsonData) return;
+            const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `updated_${fileName || 'articles.json'}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+    </script>
+</body>
+</html>

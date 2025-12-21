@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Srovnávač Wikipedia Infoboxů</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .diff-row { background-color: #fee2e2; }
+        .match-row { background-color: #f0fdf4; }
+        .sticky-col { position: sticky; left: 0; background: white; z-index: 10; border-right: 2px solid #e5e7eb; }
+        .alias-tag { font-size: 0.65rem; background: #dcfce7; color: #166534; padding: 1px 4px; border-radius: 4px; margin-right: 2px; }
+        .norm-indicator { font-size: 0.65rem; color: #64748b; font-style: italic; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8 font-sans text-slate-900">
+
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-slate-800 mb-2">Wiki Data Comparator v4</h1>
+            <p class="text-slate-600">Porovnání parametrů s pokročilou normalizací a extrakcí z šablon (deCAS).</p>
+        </header>
+
+        <!-- Configuration Section -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-xl font-semibold text-slate-700">Nastavení vstupů (max 15)</h2>
+                    <p class="text-xs text-slate-500 mt-1">U každého zdroje zvolte typ normalizace pro sjednocení formátu hodnot.</p>
+                </div>
+                <button id="addSourceBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    Přidat zdroj
+                </button>
+            </div>
+
+            <div id="sourcesContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                <!-- Source items will be injected here -->
+            </div>
+
+            <div class="flex justify-center gap-4 border-t pt-6">
+                <button id="compareBtn" class="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-lg transition-all transform hover:scale-105">
+                    Spustit analýzu
+                </button>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="resultsArea" class="hidden bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                <h2 class="text-lg font-semibold text-slate-700">Výsledky porovnání</h2>
+                <div class="flex gap-4 items-center">
+                    <label class="flex items-center gap-2 text-sm text-slate-600">
+                        <input type="checkbox" id="showOnlyDiffs" class="rounded text-blue-600"> Jen neshody
+                    </label>
+                    <button id="exportBtn" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        Exportovat CSV
+                    </button>
+                </div>
+            </div>
+            
+            <div class="overflow-x-auto max-h-[600px]">
+                <table id="comparisonTable" class="w-full text-sm text-left border-collapse">
+                    <thead class="bg-slate-100 text-slate-600 uppercase text-xs sticky top-0 z-20">
+                        <tr id="tableHeaderRow">
+                            <th class="px-4 py-3 sticky-col min-w-[200px]">Párovací ID / Články</th>
+                            <!-- Dynamic headers -->
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody" class="divide-y divide-slate-200">
+                        <!-- Data rows -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let sourcesCount = 0;
+        const maxSources = 15;
+        const container = document.getElementById('sourcesContainer');
+        const resultsArea = document.getElementById('resultsArea');
+        const tableHeaderRow = document.getElementById('tableHeaderRow');
+        const tableBody = document.getElementById('tableBody');
+
+        window.onload = () => {
+            addSource("csWiki", "číslo CAS, CAS", "title", "deCAS");
+            addSource("enWiki", "CASNo, CAS_number, CAS", "title", "deCAS");
+        };
+
+        document.getElementById('addSourceBtn').onclick = () => addSource();
+
+        function addSource(defaultLabel = "", defaultParams = "", defaultId = "title", defaultNorm = "none") {
+            if (sourcesCount >= maxSources) return;
+            sourcesCount++;
+
+            const div = document.createElement('div');
+            div.className = 'source-item p-4 bg-slate-50 border border-slate-200 rounded-lg relative';
+            div.innerHTML = `
+                <button onclick="this.parentElement.remove(); sourcesCount--;" class="absolute top-2 right-2 text-slate-400 hover:text-red-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+                <div class="mb-3">
+                    <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">JSON soubor</label>
+                    <input type="file" accept=".json" class="file-input w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-[10px] file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                </div>
+                <div class="space-y-2">
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Jazyková verze</label>
+                        <input type="text" value="${defaultLabel}" placeholder="např. csWiki" class="label-input w-full p-1.5 border border-slate-300 rounded text-xs outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase text-blue-600">Párovací klíč (např. title)</label>
+                        <input type="text" value="${defaultId}" placeholder="title" class="id-key-input w-full p-1.5 border border-blue-200 bg-blue-50 rounded text-xs outline-none focus:ring-1 focus:ring-blue-500 font-medium">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase text-green-600">Parametry (aliasy, oddělené čárkou)</label>
+                        <input type="text" value="${defaultParams}" placeholder="CASNo, CAS_number" class="param-input w-full p-1.5 border border-green-200 bg-green-50 rounded text-xs outline-none focus:ring-1 focus:ring-green-500 font-medium">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase text-amber-600">Typ normalizace</label>
+                        <select class="norm-input w-full p-1.5 border border-amber-200 bg-amber-50 rounded text-xs outline-none focus:ring-1 focus:ring-amber-500">
+                            <option value="none" ${defaultNorm === 'none' ? 'selected' : ''}>Žádná (jen odstranění komentářů)</option>
+                            <option value="numbers" ${defaultNorm === 'numbers' ? 'selected' : ''}>Jenom čísla (12345)</option>
+                            <option value="signs" ${defaultNorm === 'signs' ? 'selected' : ''}>Čísla a znaménka (123-45-6)</option>
+                            <option value="deCAS" ${defaultNorm === 'deCAS' ? 'selected' : ''}>deCAS (Extrakce z {{CASRN|...}})</option>
+                        </select>
+                    </div>
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        function cleanValue(val) {
+            if (val === null || val === undefined) return "";
+            if (typeof val !== 'string') return String(val);
+            // Odstranění <!-- ... --> komentářů
+            let cleaned = val.replace(/<!--[\s\S]*?-->/g, '');
+            return cleaned.trim();
+        }
+
+        function applyNormalization(val, type) {
+            let text = cleanValue(val);
+            if (!text) return "";
+
+            switch (type) {
+                case 'numbers':
+                    // Ponechá pouze číslice
+                    return text.replace(/\D/g, '');
+                
+                case 'signs':
+                    // Ponechá číslice a různé typy pomlček/mínusů
+                    // Obsahuje standardní spojovník, en-dash, em-dash a matematické mínus
+                    return text.replace(/[^\d\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, '');
+                
+                case 'deCAS':
+                    // 1. Pokus o extrakci z šablony {{CASRN|...}} nebo {{CAS|...}}
+                    const templateMatch = text.match(/\{\{(?:CASRN|CAS|CAS number)\s*\|\s*([^\|}]+)/i);
+                    if (templateMatch) {
+                        return templateMatch[1].trim();
+                    }
+                    // 2. Pokud není šablona, zkusíme najít vzorec CAS čísla (X-XX-X)
+                    const casMatch = text.match(/\d{2,7}-\d{2}-\d/);
+                    if (casMatch) {
+                        return casMatch[0];
+                    }
+                    // 3. Fallback na vyčištěný text
+                    return text;
+
+                default:
+                    // Základní vyčištění od mezer (vícenásobné mezery na jednu)
+                    return text.replace(/\s+/g, ' ');
+            }
+        }
+
+        document.getElementById('compareBtn').onclick = async () => {
+            const sourceElements = document.querySelectorAll('.source-item');
+            const masterMap = new Map(); // Global ID -> { sourceLabel: { value, originalTitle } }
+            const activeSources = [];
+
+            for (const el of sourceElements) {
+                const fileInput = el.querySelector('.file-input');
+                const label = el.querySelector('.label-input').value || `Zdroj ${activeSources.length + 1}`;
+                const idKey = el.querySelector('.id-key-input').value.trim();
+                const paramInput = el.querySelector('.param-input').value;
+                const normType = el.querySelector('.norm-input').value;
+                
+                const paramKeys = paramInput.split(',').map(s => s.trim()).filter(s => s !== '');
+
+                if (!fileInput.files[0] || !idKey || paramKeys.length === 0) continue;
+
+                try {
+                    const text = await fileInput.files[0].text();
+                    const json = JSON.parse(text);
+                    activeSources.push({ label, idKey, paramKeys, normType });
+
+                    const articles = json.data || [];
+                    articles.forEach(article => {
+                        let globalId = "";
+                        
+                        // Hledání ID
+                        if (article[idKey]) {
+                            globalId = cleanValue(article[idKey]);
+                        } else {
+                            for (const ib of article.infoboxes || []) {
+                                if (ib.data && ib.data[idKey]) {
+                                    globalId = cleanValue(ib.data[idKey]);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!globalId) return;
+
+                        // Hledání hodnoty a aplikace normalizace
+                        let rawFoundValue = "";
+                        let foundKeyName = "";
+                        
+                        outerLoop: for (const ib of article.infoboxes || []) {
+                            if (!ib.data) continue;
+                            for (const key of paramKeys) {
+                                if (ib.data[key] !== undefined && ib.data[key] !== null) {
+                                    const cleaned = cleanValue(ib.data[key]);
+                                    if (cleaned !== "") {
+                                        rawFoundValue = ib.data[key];
+                                        foundKeyName = key;
+                                        break outerLoop;
+                                    }
+                                }
+                            }
+                        }
+
+                        const normalizedValue = applyNormalization(rawFoundValue, normType);
+
+                        if (!masterMap.has(globalId)) masterMap.set(globalId, {});
+                        masterMap.get(globalId)[label] = {
+                            value: normalizedValue,
+                            originalValue: rawFoundValue,
+                            title: article.title,
+                            aliasUsed: foundKeyName
+                        };
+                    });
+                } catch (e) {
+                    console.error("Chyba při čtení JSON:", e);
+                }
+            }
+
+            if (activeSources.length === 0) {
+                alert("Prosím nahrajte soubory a vyplňte parametry.");
+                return;
+            }
+
+            renderTable(masterMap, activeSources);
+        };
+
+        function renderTable(masterMap, sources) {
+            resultsArea.classList.remove('hidden');
+            const showOnlyDiffs = document.getElementById('showOnlyDiffs').checked;
+            
+            tableHeaderRow.innerHTML = `
+                <th class="px-4 py-3 sticky-col min-w-[200px]">Párovací ID / Články</th>
+            `;
+            
+            sources.forEach(s => {
+                const th = document.createElement('th');
+                th.className = 'px-4 py-3 border-l border-slate-200 min-w-[180px]';
+                th.innerHTML = `
+                    <div class="text-blue-700">${s.label}</div>
+                    <div class="norm-indicator">Norm: ${s.normType}</div>
+                `;
+                tableHeaderRow.appendChild(th);
+            });
+
+            tableBody.innerHTML = '';
+            const sortedIds = Array.from(masterMap.keys()).sort();
+
+            sortedIds.forEach(id => {
+                const rowData = masterMap.get(id);
+                
+                const valuesToCompare = sources
+                    .map(s => rowData[s.label]?.value || "")
+                    .filter(v => v !== "");
+                
+                const uniqueValues = new Set(valuesToCompare);
+                const isDiscrepancy = uniqueValues.size > 1;
+
+                if (showOnlyDiffs && !isDiscrepancy) return;
+
+                const tr = document.createElement('tr');
+                tr.className = isDiscrepancy ? 'diff-row hover:bg-red-200' : 'hover:bg-slate-50';
+
+                // První sloupec: ID a názvy
+                const tdMeta = document.createElement('td');
+                tdMeta.className = 'px-4 py-3 sticky-col border-r shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]';
+                let titlesHtml = `<div class="font-mono text-[10px] text-slate-400 mb-1">ID: ${id}</div>`;
+                sources.forEach(s => {
+                    if (rowData[s.label]) {
+                        titlesHtml += `<div class="text-[11px] leading-tight"><span class="text-slate-400 font-medium">${s.label}:</span> ${rowData[s.label].title}</div>`;
+                    }
+                });
+                tdMeta.innerHTML = titlesHtml;
+                tr.appendChild(tdMeta);
+
+                // Datové sloupce
+                sources.forEach(s => {
+                    const td = document.createElement('td');
+                    td.className = 'px-4 py-3 border-l border-slate-200 align-top';
+                    const entry = rowData[s.label];
+                    
+                    if (entry && entry.value) {
+                        td.innerHTML = `
+                            <div class="font-medium">${entry.value}</div>
+                            <div class="text-[9px] text-slate-400 mt-1">
+                                <span class="alias-tag">${entry.aliasUsed}</span>
+                            </div>
+                        `;
+                        // Pokud normalizace změnila hodnotu, můžeme zobrazit původní při najetí (title)
+                        if (cleanValue(entry.originalValue) !== entry.value) {
+                            td.title = "Původní: " + cleanValue(entry.originalValue);
+                        }
+                    } else {
+                        td.innerHTML = '<span class="text-slate-300 italic text-xs">nenalezeno</span>';
+                    }
+                    tr.appendChild(td);
+                });
+
+                tableBody.appendChild(tr);
+            });
+        }
+
+        document.getElementById('showOnlyDiffs').onchange = () => {
+            document.getElementById('compareBtn').click();
+        };
+
+        document.getElementById('exportBtn').onclick = () => {
+            const table = document.getElementById('comparisonTable');
+            let csv = [];
+            const rows = table.querySelectorAll('tr');
+            
+            for (let i = 0; i < rows.length; i++) {
+                let row = [], cols = rows[i].querySelectorAll('td, th');
+                for (let j = 0; j < cols.length; j++) {
+                    let data = cols[j].innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/;/g, ",");
+                    row.push('"' + data + '"');
+                }
+                csv.push(row.join(';'));
+            }
+
+            const csvContent = "\ufeff" + csv.join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", "wiki_srovnani_normalizovane.csv");
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
+    </script>
+</body>
+</html>
